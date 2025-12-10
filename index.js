@@ -107,6 +107,18 @@ async function startServer() {
     });
     // (POST /user handler defined above)
 
+    app.post("/apply-loan", async (req, res) => {
+      const loanData = req.body;
+      loanData.application_date = new Date().toISOString();
+      loanData.status = "pending";
+      try {
+        const result = await jobsCollection.insertOne(loanData);
+        res.send(result);
+      } catch (error) {
+        res.status(500).json({ message: "Error applying for loan", error });
+      }
+    });
+
     app.listen(port, () => {
       console.log(`🚀 Server is running on port ${port}`);
     });
