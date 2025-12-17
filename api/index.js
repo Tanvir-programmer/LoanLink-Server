@@ -4,14 +4,14 @@ import dotenv from "dotenv";
 import path from "path";
 import { MongoClient } from "mongodb";
 import { ObjectId } from "mongodb";
-
+import Stripe from "stripe";
 // ✅ Fix: Force dotenv to look in the root folder for .env
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 3000;
 
 const MONGO_URI = process.env.MONGODB_URI;
@@ -171,6 +171,29 @@ app.get("/users/:email", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// ✅ NEW: DELETE USER BY EMAIL
+app.delete("/users/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    // Safety check: Don't allow deleting via an empty email parameter
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const result = await db.collection("users").deleteOne({ email: email });
+
+    if (result.deletedCount === 1) {
+      console.log(`🗑️ User deleted: ${email}`);
+      res.json({ message: "User deleted successfully from database" });
+    } else {
+      res.status(404).json({ message: "User not found in database" });
+    }
+  } catch (err) {
+    console.error("❌ Failed to delete user:", err);
+    res.status(500).json({ error: "Server error during user deletion" });
+  }
+});
 
 // ✅ 4. UPDATE LOAN BY ID
 app.put("/loans/:id", async (req, res) => {
@@ -191,7 +214,67 @@ app.put("/loans/:id", async (req, res) => {
     res.status(500).json({ error: "Invalid ID format or server error" });
   }
 });
+// ✅ NEW: UPDATE LOAN APPLICATION STATUS (For Manager Approval/Rejection)
+app.patch("/loan-applications/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status, approvedAt } = req.body;
 
+    // Validation
+    const validStatuses = ["pending", "Approved", "Rejected"];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status provided" });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = {
+      $set: {
+        status: status,
+        // Requirement 13: Log approvedAt timestamp
+        approvedAt: approvedAt || null,
+      },
+    };
+
+    const result = await db
+      .collection("loanApplications")
+      .updateOne(filter, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    res.json({
+      message: `Application ${status} successfully`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    console.error("❌ Failed to update application status:", err);
+    res.status(500).json({ error: "Server error during status update" });
+  }
+});
+// GET a single loan application by ID
+app.get("/loan-applications/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // Validate if the ID is a valid MongoDB ObjectId before querying
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid ID format" });
+    }
+
+    const query = { _id: new ObjectId(id) };
+    const application = await db.collection("loanApplications").findOne(query);
+
+    if (!application) {
+      return res.status(404).json({ message: "Loan application not found" });
+    }
+
+    res.status(200).json(application);
+  } catch (err) {
+    console.error("❌ Database Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 // --- GET USER ROLE ONLY ---
 app.get("/user/role/:email", async (req, res) => {
   try {
@@ -332,6 +415,44 @@ app.get("/pending-loans", async (req, res) => {
     res.json(pending);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Update Loan Status after payment
+app.patch("/loan-applications/payment/:id", async (req, res) => {
+  const id = req.params.id;
+  const { transactionId } = req.body;
+  const filter = { _id: new ObjectId(id) };
+  const updateDoc = {
+    $set: {
+      paymentStatus: "paid",
+      transactionId: transactionId,
+      paidAt: new Date().toISOString(),
+    },
+  };
+  const result = await db
+    .collection("loanApplications")
+    .updateOne(filter, updateDoc);
+  res.send(result);
+});
+app.post("/create-payment-intent", async (req, res) => {
+  try {
+    const { price } = req.body;
+    console.log("Creating intent for price:", price);
+
+    // Create the intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(price * 100), // Convert to cents
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+
+    console.log("✅ Intent created successfully!");
+    res.send({ clientSecret: paymentIntent.client_secret });
+  } catch (error) {
+    // 👈 THIS WILL TELL US EXACTLY WHY STRIPE IS REJECTING IT
+    console.error("❌ STRIPE ERROR:", error.message);
+    res.status(500).send({ error: error.message });
   }
 });
 
