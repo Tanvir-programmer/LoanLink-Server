@@ -17,7 +17,7 @@ app.use(
     origin: [
       "http://localhost:5173",
       "http://localhost:5174",
-      "https://loan-link-server-two.vercel.app", // 👈 Replace with your actual frontend URL
+      "https://loanlink1.netlify.app", // 👈 Replace with your actual frontend URL
     ],
     credentials: true,
   })
@@ -169,14 +169,12 @@ app.post("/user", async (req, res) => {
         .updateOne({ email: userData.email }, { $set: { last_loggedIn: now } });
       return res.json(result);
     }
-    const result = await db
-      .collection("users")
-      .insertOne({
-        ...userData,
-        role: userData.role || "borrower",
-        created_at: now,
-        last_loggedIn: now,
-      });
+    const result = await db.collection("users").insertOne({
+      ...userData,
+      role: userData.role || "borrower",
+      created_at: now,
+      last_loggedIn: now,
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -233,13 +231,11 @@ app.get("/loan-applications", async (req, res) => {
 
 app.post("/apply-loan", async (req, res) => {
   try {
-    const result = await db
-      .collection("loanApplications")
-      .insertOne({
-        ...req.body,
-        status: "pending",
-        application_date: new Date(),
-      });
+    const result = await db.collection("loanApplications").insertOne({
+      ...req.body,
+      status: "pending",
+      application_date: new Date(),
+    });
     res.status(201).json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
