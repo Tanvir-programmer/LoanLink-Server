@@ -81,29 +81,54 @@ app.get("/users", async (req, res) => {
 });
 
 // Upsert User (Login/Register logic)
+// Upsert User (Login / Register)
 app.post("/user", async (req, res) => {
   try {
     const database = await getDb();
-    const userData = req.body;
-    const now = new Date().toISOString();
-    const query = { email: userData.email };
+    const usersCollection = database.collection("users");
 
-    const existing = await database.collection("users").findOne(query);
-    if (existing) {
-      const result = await database.collection("users").updateOne(query, {
-        $set: { last_loggedIn: now },
-      });
-      return res.json(result);
+    const { name, email, image, role } = req.body;
+    const now = new Date().toISOString();
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
     }
 
+    // ✅ Image validation (VERY IMPORTANT)
+    const safeImage =
+      image && image.includes("googleusercontent.com")
+        ? image
+        : "https://i.ibb.co/4pDNDk1/avatar.png";
+
+    const existingUser = await usersCollection.findOne({ email });
+
+    if (existingUser) {
+      // Update last login + fix image if broken
+      await usersCollection.updateOne(
+        { email },
+        {
+          $set: {
+            last_loggedIn: now,
+            image: safeImage,
+          },
+        }
+      );
+
+      return res.json({ message: "User updated successfully" });
+    }
+
+    // New user
     const newUser = {
-      ...userData,
-      role: userData.role || "borrower",
+      name: name || "User",
+      email,
+      image: safeImage,
+      role: role || "borrower",
       created_at: now,
       last_loggedIn: now,
     };
-    const result = await database.collection("users").insertOne(newUser);
-    res.json(result);
+
+    await usersCollection.insertOne(newUser);
+    res.status(201).json({ message: "User created successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
